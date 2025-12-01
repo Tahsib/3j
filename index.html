@@ -30,7 +30,6 @@
         <p style="color:#ddd;margin:0 0 16px 0">Guide Jadu to gather the ingredients and enjoy the joint!!</p>
         <div style="display:flex;gap:10px;justify-content:center">
             <button id="startBtn" style="padding:10px 18px;border-radius:8px;border:0;background:#4caf50;color:white;font-weight:700;cursor:pointer">Start</button>
-            <button id="mutedBtn" style="padding:10px 14px;border-radius:8px;border:0;background:#2196f3;color:white;font-weight:700;cursor:pointer">Start (Muted)</button>
         </div>
     </div>
 </div>
@@ -391,7 +390,6 @@ window.addEventListener('resize', syncHiddenGifSize);
 // Start screen handlers
 const startScreen = document.getElementById('startScreen');
 const startBtn = document.getElementById('startBtn');
-const mutedBtn = document.getElementById('mutedBtn');
 // No selection UI — audio will come from the local track (ganja_loop.mp3) if present.
 // start screen no longer displays an audio status line
 
@@ -494,7 +492,6 @@ function startGame(muted = false){
 }
 
 if (startBtn) startBtn.addEventListener('click', () => startGame(false));
-if (mutedBtn) mutedBtn.addEventListener('click', () => startGame(true));
 
 // Handle arrow keys (grid movement)
 // Unified movement logic — used by keyboard and touch handlers so behavior is consistent

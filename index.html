@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Grid-based Pac-Man Style Game</title>
+    <style>
+        html, body {
+                height: 100%;
+                margin: 0;
+            }
+
+            canvas {
+                background-color: #000;
+                display: block;
+                width: 100vw; /* visually fill viewport */
+                height: 100vh; /* visually fill viewport */
+                border: 2px solid #333;
+            }
+    </style>
+</head>
+<body>
+
+<canvas id="game" width="320" height="320"></canvas>
+
+<!-- Start screen overlay (shown before the game starts) -->
+<div id="startScreen" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);z-index:9999">
+    <div style="text-align:center;color:#fff;padding:22px;border-radius:14px;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));width:min(540px,calc(100%-40px));box-shadow:0 10px 40px rgba(0,0,0,0.6)">
+        <img src="jadu2.gif" alt="Jadu" style="width:150px;height:150px;object-fit:contain;border-radius:12px;margin-bottom:14px;display:block;margin-left:auto;margin-right:auto"/>
+        <h2 style="margin:0 0 10px 0;font-size:26px">Jadu's Joint Journey</h2>
+        <p style="color:#ddd;margin:0 0 16px 0">Guide Jadu through the grid — collect cigarettes and hunt down the special joint to win.</p>
+        <div style="display:flex;gap:10px;justify-content:center">
+            <button id="startBtn" style="padding:10px 18px;border-radius:8px;border:0;background:#4caf50;color:white;font-weight:700;cursor:pointer">Start</button>
+            <button id="mutedBtn" style="padding:10px 14px;border-radius:8px;border:0;background:#2196f3;color:white;font-weight:700;cursor:pointer">Start (Muted)</button>
+        </div>
+    </div>
+</div>
+
+<!-- Small floating audio controls (always-visible) -->
+<div id="audioControls" style="position:fixed;top:10px;right:10px;z-index:9999;color:#fff;background:rgba(0,0,0,0.35);padding:6px;border-radius:10px;font-size:14px;display:flex;gap:8px;align-items:center">
+    <button id="toggleMuteBtn" style="border-radius:8px;border:0;padding:8px;background:#333;color:#fff;cursor:pointer">🔈</button>
+    <button id="audioRetryBtn" style="display:none;margin-left:6px;border-radius:8px;border:0;padding:8px;background:#2b7;color:#042;cursor:pointer;color:#001;">Enable audio</button>
+</div>
+
+<!-- Mobile touch controls (visible on small/touch screens) -->
+<div id="touchControls" style="position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;display:none;align-items:center;justify-content:center;gap:8px;">
+    <div style="display:flex;flex-direction:column;gap:10px;align-items:center;">
+    <button class="touchBtn" id="touchUp" aria-label="Move up" style="width:64px;height:64px;border-radius:14px;border:0;background:rgba(255,255,255,0.06);color:#fff;font-size:24px">▲</button>
+        <div style="display:flex;gap:8px;">
+            <button class="touchBtn" id="touchLeft" aria-label="Move left" style="width:64px;height:64px;border-radius:14px;border:0;background:rgba(255,255,255,0.06);color:#fff;font-size:24px">◀</button>
+            <button class="touchBtn" id="touchDown" aria-label="Move down" style="width:64px;height:64px;border-radius:14px;border:0;background:rgba(255,255,255,0.06);color:#fff;font-size:24px">▼</button>
+            <button class="touchBtn" id="touchRight" aria-label="Move right" style="width:64px;height:64px;border-radius:14px;border:0;background:rgba(255,255,255,0.06);color:#fff;font-size:24px">▶</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// Grid size (number of tiles)
+const GRID_COLS = 10; // keep the original grid layout but scale to viewport
+const GRID_ROWS = 10;
+
+// dynamic tile size (pixels per tile) will be computed to exactly fill the viewport
+let tileW = 32; // computed per-resize to fill entire viewport horizontally
+let tileH = 32; // computed per-resize to fill entire viewport vertically
+let cols = GRID_COLS;
+let rows = GRID_ROWS;
+
+// base map (border walls). Interior will be randomized on start for variety.
+const baseMap = [
+    [1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1]
+];
+
+// working map that may be randomized each game
+let map = JSON.parse(JSON.stringify(baseMap));
+
+let player = { x: 1, y: 1 };
+let started = false; // game starts when the player clicks Start or presses Enter
+let collected = 0;
+// Require collecting all cigarettes to unlock (spawn) the special joint
+const maxCollectibles = 8; // limited number per run
+const goalToSpawnSpecial = maxCollectibles; // need to collect them all to spawn special
+let collectibles = [];
+let special = null;
+
+// Load animated GIF — put an <img> in the DOM so the browser keeps animating it
+// (some browsers don't advance animation frames for Image() objects that are never attached).
+// We keep it visually hidden but present so drawImage uses an actively-animating element.
+const playerImg = new Image();
+playerImg.id = 'playerImg';
+playerImg.src = 'jadu2.gif'; // replace with your GIF
+// Keep the element attached and off-screen (not display:none) so browsers keep animating GIF frames
+// Keep the element attached and visible to the rendering pipeline so animations run
+// Use opacity:0 (not display:none) and size it to a small visible element — this avoids browsers pausing animation
+playerImg.style.position = 'absolute';
+playerImg.style.left = '8px';
+playerImg.style.top = '8px';
+// keep it almost invisible but still painted by the browser so frames advance
+playerImg.style.opacity = '0.01';
+// don't push it behind the canvas — keep it in the normal painting flow so browsers keep animating frames
+// (some browsers pause animation for elements that are placed behind or fully off-screen)
+playerImg.style.zIndex = '';
+playerImg.style.pointerEvents = 'none';
+// size it to match tile size so drawImage gets the same scaling and the GIF stays active
+playerImg.style.width = tileW + 'px';
+playerImg.style.height = tileH + 'px';
+let playerImgLoaded = false;
+playerImg.onload = () => {
+    playerImgLoaded = true;
+    console.log('playerImg loaded:', playerImg.src);
+    // good to go — ensure we redraw after load in case we attempted to draw earlier
+    draw();
+};
+playerImg.onerror = (err) => console.warn('Failed to load player GIF (jadu2.gif)', err);
+// Append to DOM (hidden) so browsers animate the frames while we draw it to canvas
+document.body.appendChild(playerImg);
+
+// --- Background music (local file only) ---
+// This game expects a local licensed file named 'ganja_loop.mp3' in the same folder.
+let bgAudioElem = null; // HTMLAudioElement for the local track
+let audioFileAvailable = false;
+let musicOn = false;
+let userMuted = false;
+
+// No WebAudio synth used — audio comes exclusively from the local file ganja_loop.mp3.
+
+function startMusic(){
+    if(!bgAudioElem){
+        console.warn('No local audio element configured. Place ganja_loop.mp3 in the same folder.');
+        return;
+    }
+    if(!audioFileAvailable){
+        console.warn('Local audio file ganja_loop.mp3 not available — nothing to play.');
+        return;
+    }
+    try{
+        bgAudioElem.volume = 0.8;
+        bgAudioElem.currentTime = 0;
+        bgAudioElem.play().catch(e => console.warn('bgAudioElem.play() failed', e));
+        musicOn = true;
+    }catch(e){ console.warn('startMusic failed', e); }
+}
+
+function stopMusic(){
+    try{ if(bgAudioElem && !bgAudioElem.paused){ bgAudioElem.pause(); bgAudioElem.currentTime = 0; } }catch(e){}
+    musicOn = false;
+}
+
+// Audio is handled only via the local bgAudioElem (ganja_loop.mp3).
+
+// --- Joint image asset (SVG data URL) ---
+let specialImg = new Image();
+let specialImgLoaded = false;
+// Try loading a local PNG first (joint.png in the same directory). If that fails, fall back to the embedded SVG.
+specialImg.crossOrigin = 'anonymous';
+specialImg.onload = () => { specialImgLoaded = true; };
+specialImg.onerror = () => { specialImgLoaded = false; console.warn('Failed to load joint2.png'); };
+// start by trying the local file
+specialImg.src = 'joint2.png';
+
+// Optional user-supplied music file — place a licensed/own copy here named 'ganja_loop.mp3'
+// If present the game can play it when audioMode === 'file'.
+try{
+    bgAudioElem = new Audio('ganja_loop.mp3');
+    bgAudioElem.loop = true;
+    bgAudioElem.preload = 'auto';
+    bgAudioElem.crossOrigin = 'anonymous';
+    bgAudioElem.addEventListener('canplaythrough', () => {
+        // audio availability recorded but we do NOT gate startMusic on this event.
+        audioFileAvailable = true;
+        console.log('Local audio available: ganja_loop.mp3');
+    });
+    bgAudioElem.addEventListener('error', (e) => {
+        audioFileAvailable = false;
+        console.warn('Local audio (ganja_loop.mp3) not available', e);
+    });
+}catch(e){ console.warn('Error creating bgAudioElem', e); audioFileAvailable = false; }
+
+// Initialize collectibles at random grid positions
+function spawnCollectibles() {
+    // Fill the collectibles array with unique random positions.
+    // Avoid placing any collectible on the player's current cell.
+    collectibles = [];
+
+    // Maximum number of unique cells available (total cells minus player's cell)
+    const totalCells = cols * rows;
+    const maxPossible = Math.max(0, totalCells - 1);
+    const count = Math.min(maxCollectibles, maxPossible);
+
+    const used = new Set();
+    // reserve player's cell so we won't place a collectible there
+    used.add(`${player.x},${player.y}`);
+
+    // reserve all wall cells so collectibles are never placed inside walls
+    for (let r=0; r<rows; r++){
+        for (let c=0; c<cols; c++){
+            if (map[r] && map[r][c] === 1) used.add(`${c},${r}`);
+        }
+    }
+
+    while (collectibles.length < count) {
+        const x = Math.floor(Math.random() * cols);
+        const y = Math.floor(Math.random() * rows);
+        const key = `${x},${y}`;
+        if (!used.has(key)) {
+            used.add(key);
+            collectibles.push({ x, y });
+        }
+        // if grid nearly full this loop will finish quickly because count <= maxPossible
+    }
+}
+
+// Utility: check connectivity of free cells (0) from player's position
+function isMapFullyConnected(testMap) {
+    const visited = new Set();
+    const startKey = `${player.x},${player.y}`;
+    if (testMap[player.y][player.x] === 1) return false; // player inside wall
+
+    const stack = [[player.x, player.y]];
+    visited.add(startKey);
+
+    while (stack.length) {
+        const [x,y] = stack.pop();
+        const deltas = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [dx,dy] of deltas){
+            const nx = x+dx, ny = y+dy;
+            if(nx>=0 && nx<cols && ny>=0 && ny<rows){
+                if(testMap[ny][nx] === 0){
+                    const key = `${nx},${ny}`;
+                    if(!visited.has(key)){
+                        visited.add(key);
+                        stack.push([nx,ny]);
+                    }
+                }
+            }
+        }
+    }
+
+    // count free cells
+    let freeCount = 0;
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) if(testMap[r][c]===0) freeCount++;
+    return visited.size === freeCount;
+}
+
+// Randomize interior walls while maintaining full connectivity of empty cells
+function randomizeInteriorWalls(minWalls = 3, maxWalls = 8){
+    // copy baseMap
+    const tryMap = JSON.parse(JSON.stringify(baseMap));
+    const target = Math.max(0, Math.min(maxWalls, Math.floor(Math.random()*(maxWalls-minWalls+1))+minWalls));
+
+    let placed = 0;
+    let attempts = 0;
+    const maxAttempts = 200;
+    while(placed < target && attempts < maxAttempts){
+        attempts++;
+        const rx = Math.floor(Math.random()*(cols-2))+1; // avoid border
+        const ry = Math.floor(Math.random()*(rows-2))+1;
+        // skip player's start cell
+        if(rx === player.x && ry === player.y) continue;
+        if(tryMap[ry][rx] === 1) continue;
+        // temporarily place wall
+        tryMap[ry][rx] = 1;
+        // ensure connectivity
+        if(isMapFullyConnected(tryMap)){
+            placed++;
+        } else {
+            // revert
+            tryMap[ry][rx] = 0;
+        }
+    }
+
+    // commit tryMap to global map
+    map = tryMap;
+}
+
+// Maze generation (randomized DFS): carve passages among odd grid cells
+function generateMaze(){
+    // work from baseMap so border remains
+    const m = JSON.parse(JSON.stringify(baseMap));
+
+    // make interior cells walls initially (so carving will produce visible passages)
+    for(let y=1;y<rows-1;y++){
+        for(let x=1;x<cols-1;x++){
+            m[y][x] = 1;
+        }
+    }
+
+    // define starting cell (make sure it's a passage)
+    const startX = (player.x % 2 === 1) ? player.x : 1;
+    const startY = (player.y % 2 === 1) ? player.y : 1;
+
+    const stack = [[startX, startY]];
+    const visited = new Set();
+    visited.add(`${startX},${startY}`);
+    m[startY][startX] = 0;
+
+    const dirs = [[2,0],[-2,0],[0,2],[0,-2]];
+
+    while(stack.length){
+        const [x,y] = stack[stack.length-1];
+        const neighbors = [];
+        for(const [dx,dy] of dirs){
+            const nx = x+dx, ny = y+dy;
+            if(nx>0 && nx<cols-1 && ny>0 && ny<rows-1){
+                if(!visited.has(`${nx},${ny}`)) neighbors.push([nx,ny]);
+            }
+        }
+
+        if(neighbors.length === 0){
+            stack.pop();
+            continue;
+        }
+
+        const [nx,ny] = neighbors[Math.floor(Math.random()*neighbors.length)];
+        // knock down wall between
+        const wx = x + (nx-x)/2;
+        const wy = y + (ny-y)/2;
+        m[wy][wx] = 0;
+        m[ny][nx] = 0;
+        visited.add(`${nx},${ny}`);
+        stack.push([nx,ny]);
+    }
+
+    map = m;
+}
+
+// generate a maze on load and then place collectibles
+generateMaze();
+spawnCollectibles();
+
+// Resize canvas to fill the viewport and compute tile size so the grid fits
+function resizeCanvas() {
+    // set drawing buffer size explicitly to viewport pixel size
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // compute per-axis tile size so the grid exactly fills the viewport
+    // (this stretches tiles if viewport aspect ratio isn't square but ensures the board fills the screen)
+    tileW = canvas.width / cols;
+    tileH = canvas.height / rows;
+
+    // Optional: snap to integers for clearer pixel shapes when desired
+    tileW = Math.max(1, Math.floor(tileW));
+    tileH = Math.max(1, Math.floor(tileH));
+
+    // Re-render immediately (game loop draws continuously but this helps on resize)
+    draw();
+}
+
+// Initialize canvas size for first render and keep responsive
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Keep the hidden GIF element sized to the current tile size so browser renders frames properly at the same dimension
+function syncHiddenGifSize(){
+    if(playerImg){
+        const s = Math.min(tileW, tileH);
+        playerImg.style.width = s + 'px';
+        playerImg.style.height = s + 'px';
+    }
+}
+// Sync right away and after every resize
+syncHiddenGifSize();
+window.addEventListener('resize', syncHiddenGifSize);
+
+// Start screen handlers
+const startScreen = document.getElementById('startScreen');
+const startBtn = document.getElementById('startBtn');
+const mutedBtn = document.getElementById('mutedBtn');
+// No selection UI — audio will come from the local track (ganja_loop.mp3) if present.
+// start screen no longer displays an audio status line
+
+// audio control UI wiring (mute)
+const toggleMuteBtn = document.getElementById('toggleMuteBtn');
+
+function updateAudioUI(){
+    if(toggleMuteBtn) toggleMuteBtn.innerText = userMuted ? '🔇' : '🔊';
+}
+
+if(toggleMuteBtn){
+    toggleMuteBtn.addEventListener('click', () => {
+        userMuted = !userMuted;
+        if(userMuted) stopMusic(); else startMusic();
+        updateAudioUI();
+    });
+}
+
+updateAudioUI();
+
+// Touch / mobile support: show touch controls when on a touch device
+function isTouchDevice(){
+    return ('ontouchstart' in window) || navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0;
+}
+
+if(isTouchDevice()){
+    const tc = document.getElementById('touchControls');
+    if(tc) tc.style.display = 'block';
+}
+
+// Wire up on-screen direction buttons
+const touchUp = document.getElementById('touchUp');
+const touchDown = document.getElementById('touchDown');
+const touchLeft = document.getElementById('touchLeft');
+const touchRight = document.getElementById('touchRight');
+
+function handleDirectionalTap(dx, dy){
+    const nx = player.x + dx;
+    const ny = player.y + dy;
+    attemptMoveTo(nx, ny);
+}
+
+if(touchUp) touchUp.addEventListener('touchstart', (e)=>{ e.preventDefault(); handleDirectionalTap(0, -1); });
+if(touchDown) touchDown.addEventListener('touchstart', (e)=>{ e.preventDefault(); handleDirectionalTap(0, 1); });
+if(touchLeft) touchLeft.addEventListener('touchstart', (e)=>{ e.preventDefault(); handleDirectionalTap(-1, 0); });
+if(touchRight) touchRight.addEventListener('touchstart', (e)=>{ e.preventDefault(); handleDirectionalTap(1, 0); });
+
+// Also support swipe gestures on the canvas
+let tStartX = null, tStartY = null;
+canvas.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    tStartX = t.clientX; tStartY = t.clientY;
+}, { passive: true });
+
+canvas.addEventListener('touchend', (e) => {
+    if(tStartX === null || tStartY === null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - tStartX;
+    const dy = t.clientY - tStartY;
+    const absX = Math.abs(dx), absY = Math.abs(dy);
+    const threshold = Math.max(24, Math.min(window.innerWidth, window.innerHeight) * 0.04); // small threshold
+    if(Math.max(absX, absY) < threshold){
+        tStartX = tStartY = null; return; // not a significant swipe
+    }
+    if(absX > absY){
+        if(dx > 0) handleDirectionalTap(1,0); else handleDirectionalTap(-1,0);
+    }else{
+        if(dy > 0) handleDirectionalTap(0,1); else handleDirectionalTap(0,-1);
+    }
+    tStartX = tStartY = null;
+}, { passive: true });
+
+function startGame(muted = false){
+    started = true;
+    // hide start overlay
+    if (startScreen) startScreen.style.display = 'none';
+    // reset/initialize values just in case
+    collected = 0;
+    player.x = 1;
+    player.y = 1;
+    special = null;
+    // generate a new maze layout each game so boxes form a coherent maze
+    generateMaze();
+    spawnCollectibles();
+    userMuted = !!muted;
+    // Start background music unless muted
+    if (!userMuted) startMusic();
+    else stopMusic();
+    draw();
+}
+
+if (startBtn) startBtn.addEventListener('click', () => startGame(false));
+if (mutedBtn) mutedBtn.addEventListener('click', () => startGame(true));
+
+// Handle arrow keys (grid movement)
+// Unified movement logic — used by keyboard and touch handlers so behavior is consistent
+function attemptMoveTo(newX, newY){
+    // Keep inside grid and prevent moving into walls
+    if(!(newX >= 0 && newX < cols && newY >= 0 && newY < rows)) return false;
+    if (map[newY] && map[newY][newX] === 1) return false; // blocked by wall
+
+    player.x = newX;
+    player.y = newY;
+
+    // Check collectibles collision
+    const hit = collectibles.some(c => c.x === player.x && c.y === player.y);
+    if(hit){
+        collectibles = collectibles.filter(c => !(c.x === player.x && c.y === player.y));
+        collected++;
+    }
+
+    // Spawn special joint if needed
+    if(collected >= goalToSpawnSpecial && !special){
+        let emptyCells = [];
+        for(let r=0;r<rows;r++){
+            for(let c=0;c<cols;c++){
+                let occupied = (map[r] && map[r][c] === 1) || collectibles.some(col => col.x===c && col.y===r) || (player.x===c && player.y===r);
+                if(!occupied) emptyCells.push({x:c,y:r});
+            }
+        }
+        if(emptyCells.length) special = emptyCells[Math.floor(Math.random()*emptyCells.length)];
+    }
+
+    // Check special collision
+    if(special && special.x === player.x && special.y === player.y){
+        stopMusic();
+        const params = new URLSearchParams({ score: String(collected) });
+        window.location.href = 'win.html?' + params.toString();
+        return true;
+    }
+
+    return true;
+}
+
+document.addEventListener("keydown", e => {
+    // Allow starting the game with Enter or Space from the start screen.
+    if (!started && (e.key === 'Enter' || e.key === ' ')) {
+        startGame();
+        return;
+    }
+    // Ignore movement keys until the game has started
+    if (!started) return;
+    let newX = player.x;
+    let newY = player.y;
+    if(e.key === "ArrowUp") newY -= 1;
+    if(e.key === "ArrowDown") newY += 1;
+    if(e.key === "ArrowLeft") newX -= 1;
+    if(e.key === "ArrowRight") newX += 1;
+
+    // attempt move handles wall checks and spawn/collisions
+    attemptMoveTo(newX, newY);
+});
+
+// Draw everything
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Draw walls (map) — impassable boxes like Pac-Man
+    for(let r=0;r<rows;r++){
+        for(let c=0;c<cols;c++){
+            if(map[r] && map[r][c] === 1){
+                const wx = c * tileW;
+                const wy = r * tileH;
+                ctx.fillStyle = '#1e3a5f'; // wall fill
+                ctx.fillRect(wx + 2, wy + 2, tileW - 4, tileH - 4);
+                // subtle inner highlight
+                ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+                ctx.strokeRect(wx + 2, wy + 2, tileW - 4, tileH - 4);
+            }
+        }
+    }
+
+    // Draw collectibles as cigarettes (white body, brown filter, small ember)
+    collectibles.forEach(c => {
+        // Position and size (using separate width/height to fully cover viewport)
+        const x = c.x * tileW + tileW/4;
+        const y = c.y * tileH + tileH/2 - tileH/12; // vertically centered inside the cell
+        const cigWidth = tileW/2;
+        const cigHeight = tileH/6;
+
+        // White cigarette body
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x, y, cigWidth - cigHeight, cigHeight);
+
+        // Brown filter
+        ctx.fillStyle = "#c68642";
+        ctx.fillRect(x + cigWidth - cigHeight, y, cigHeight, cigHeight);
+
+        // Ember (tiny orange/red rectangle at the lit end)
+        ctx.fillStyle = "#ff6a00";
+        ctx.fillRect(x + cigWidth - 3, y + cigHeight/4, 3, cigHeight/2);
+
+        // Optional faint smoke dot (subtle gray, adds a tiny touch)
+        ctx.fillStyle = "rgba(200,200,200,0.25)";
+        ctx.beginPath();
+        ctx.arc(x + cigWidth - 6, y - cigHeight/2, 2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Draw special item as a weed joint (rolled paper, filter on the left, ember/ash on the right)
+    if(special){
+        const sx = special.x*tileW + tileW/4;
+        const sy = special.y*tileH + tileH/4;
+        const sW = tileW/2;
+        const sH = tileH/2;
+        if (specialImgLoaded) {
+            // draw the preloaded joint SVG image for a clean, consistent look
+            ctx.drawImage(specialImg, sx, sy, sW, sH);
+        }
+    }
+
+    // Draw player GIF at its original (intrinsic) size, centered in the grid cell
+    if (playerImgLoaded && playerImg.naturalWidth && playerImg.naturalHeight) {
+        const pw = playerImg.naturalWidth;
+        const ph = playerImg.naturalHeight;
+        // center within the cell
+        const px = player.x * tileW + (tileW - pw) / 2;
+        const py = player.y * tileH + (tileH - ph) / 2;
+        ctx.drawImage(playerImg, px, py, pw, ph);
+    } else {
+        // fallback to tile-sized draw while the GIF isn't ready
+        ctx.drawImage(playerImg, player.x*tileW, player.y*tileH, tileW, tileH);
+    }
+}
+
+// Game loop
+function gameLoop(){
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>

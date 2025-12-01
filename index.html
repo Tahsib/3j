@@ -87,10 +87,10 @@ let map = JSON.parse(JSON.stringify(baseMap));
 let player = { x: 1, y: 1 };
 let started = false; // game starts when the player clicks Start or presses Enter
 let collected = 0;
-// Require collecting all cigarettes to unlock (spawn) the special joint
-const maxCollectibles = 8; // limited number per run
-const goalToSpawnSpecial = maxCollectibles; // need to collect them all to spawn special
-let collectibles = [];
+// Require collecting 4 specific items: cig, paper, roach, zang
+const requiredItems = ['cig', 'paper', 'roach', 'zang'];
+const collectedItems = new Set(); // track which items collected
+let collectibles = []; // will contain 4 items, one of each type
 let special = null;
 
 // Load animated GIF — put an <img> in the DOM so the browser keeps animating it
@@ -169,13 +169,18 @@ specialImg.onerror = () => { specialImgLoaded = false; console.warn('Failed to l
 // start by trying the local file
 specialImg.src = 'joint2.png';
 
-// --- Cigarette image asset ---
-let cigImg = new Image();
-let cigImgLoaded = false;
-cigImg.crossOrigin = 'anonymous';
-cigImg.onload = () => { cigImgLoaded = true; };
-cigImg.onerror = () => { cigImgLoaded = false; console.warn('Failed to load cig.png'); };
-cigImg.src = 'cig.png';
+// --- Item image assets ---
+const itemImages = {};
+const itemsLoaded = {};
+
+requiredItems.forEach(itemType => {
+    itemImages[itemType] = new Image();
+    itemsLoaded[itemType] = false;
+    itemImages[itemType].crossOrigin = 'anonymous';
+    itemImages[itemType].onload = () => { itemsLoaded[itemType] = true; };
+    itemImages[itemType].onerror = () => { itemsLoaded[itemType] = false; console.warn(`Failed to load ${itemType}.png`); };
+    itemImages[itemType].src = `${itemType}.png`;
+});
 
 // Optional user-supplied music file — place a licensed/own copy here named 'ganja_loop.mp3'
 // If present the game can play it when audioMode === 'file'.
@@ -195,38 +200,39 @@ try{
     });
 }catch(e){ console.warn('Error creating bgAudioElem', e); audioFileAvailable = false; }
 
-// Initialize collectibles at random grid positions
+// Initialize collectibles at random grid positions (4 specific items)
 function spawnCollectibles() {
-    // Fill the collectibles array with unique random positions.
-    // Avoid placing any collectible on the player's current cell.
     collectibles = [];
+    collectedItems.clear();
 
-    // Maximum number of unique cells available (total cells minus player's cell)
     const totalCells = cols * rows;
     const maxPossible = Math.max(0, totalCells - 1);
-    const count = Math.min(maxCollectibles, maxPossible);
+    const count = Math.min(requiredItems.length, maxPossible);
 
     const used = new Set();
-    // reserve player's cell so we won't place a collectible there
     used.add(`${player.x},${player.y}`);
 
-    // reserve all wall cells so collectibles are never placed inside walls
+    // reserve all wall cells
     for (let r=0; r<rows; r++){
         for (let c=0; c<cols; c++){
             if (map[r] && map[r][c] === 1) used.add(`${c},${r}`);
         }
     }
 
-    while (collectibles.length < count) {
-        const x = Math.floor(Math.random() * cols);
-        const y = Math.floor(Math.random() * rows);
-        const key = `${x},${y}`;
-        if (!used.has(key)) {
-            used.add(key);
-            collectibles.push({ x, y });
+    // Place one of each required item
+    requiredItems.forEach(itemType => {
+        let placed = false;
+        while (!placed) {
+            const x = Math.floor(Math.random() * cols);
+            const y = Math.floor(Math.random() * rows);
+            const key = `${x},${y}`;
+            if (!used.has(key)) {
+                used.add(key);
+                collectibles.push({ x, y, type: itemType });
+                placed = true;
+            }
         }
-        // if grid nearly full this loop will finish quickly because count <= maxPossible
-    }
+    });
 }
 
 // Utility: check connectivity of free cells (0) from player's position
@@ -473,6 +479,7 @@ function startGame(muted = false){
     if (startScreen) startScreen.style.display = 'none';
     // reset/initialize values just in case
     collected = 0;
+    collectedItems.clear();
     player.x = 1;
     player.y = 1;
     special = null;
@@ -500,14 +507,16 @@ function attemptMoveTo(newX, newY){
     player.y = newY;
 
     // Check collectibles collision
-    const hit = collectibles.some(c => c.x === player.x && c.y === player.y);
-    if(hit){
-        collectibles = collectibles.filter(c => !(c.x === player.x && c.y === player.y));
+    const hitIndex = collectibles.findIndex(c => c.x === player.x && c.y === player.y);
+    if(hitIndex >= 0){
+        const item = collectibles[hitIndex];
+        collectedItems.add(item.type);
+        collectibles.splice(hitIndex, 1);
         collected++;
     }
 
-    // Spawn special joint if needed
-    if(collected >= goalToSpawnSpecial && !special){
+    // Spawn special joint if all 4 items collected
+    if(collectedItems.size === requiredItems.length && !special){
         let emptyCells = [];
         for(let r=0;r<rows;r++){
             for(let c=0;c<cols;c++){
@@ -567,40 +576,25 @@ function draw() {
         }
     }
 
-    // Draw collectibles as cigarettes (image or fallback procedural)
+    // Draw collectible items (cig, paper, roach, zang)
     collectibles.forEach(c => {
         const x = c.x * tileW + tileW/4;
         const y = c.y * tileH + tileH/4;
-        const cigWidth = tileW/2;
-        const cigHeight = tileH/2;
+        const itemWidth = tileW/2;
+        const itemHeight = tileH/2;
 
-        if (cigImgLoaded) {
-            // Draw cig.png image
-            ctx.drawImage(cigImg, x, y, cigWidth, cigHeight);
+        if (itemsLoaded[c.type] && itemImages[c.type]) {
+            // Draw item image
+            ctx.drawImage(itemImages[c.type], x, y, itemWidth, itemHeight);
         } else {
-            // Fallback: procedural cigarette (white body, brown filter, ember)
-            const cigW = tileW/2;
-            const cigH = tileH/6;
-            const px = c.x * tileW + tileW/4;
-            const py = c.y * tileH + tileH/2 - tileH/12;
-
-            // White cigarette body
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(px, py, cigW - cigH, cigH);
-
-            // Brown filter
-            ctx.fillStyle = "#c68642";
-            ctx.fillRect(px + cigW - cigH, py, cigH, cigH);
-
-            // Ember (tiny orange/red rectangle at the lit end)
-            ctx.fillStyle = "#ff6a00";
-            ctx.fillRect(px + cigW - 3, py + cigH/4, 3, cigH/2);
-
-            // Optional faint smoke dot
-            ctx.fillStyle = "rgba(200,200,200,0.25)";
-            ctx.beginPath();
-            ctx.arc(px + cigW - 6, py - cigH/2, 2, 0, Math.PI * 2);
-            ctx.fill();
+            // Fallback: colored square with item label
+            ctx.fillStyle = '#666';
+            ctx.fillRect(x, y, itemWidth, itemHeight);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(c.type.toUpperCase(), x + itemWidth/2, y + itemHeight/2);
         }
     });
 

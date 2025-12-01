@@ -139,14 +139,15 @@ function startMusic(){
         console.warn('No local audio element configured. Place ganja_loop.mp3 in the same folder.');
         return;
     }
-    if(!audioFileAvailable){
-        console.warn('Local audio file ganja_loop.mp3 not available — nothing to play.');
-        return;
-    }
     try{
         bgAudioElem.volume = 0.8;
         bgAudioElem.currentTime = 0;
-        bgAudioElem.play().catch(e => console.warn('bgAudioElem.play() failed', e));
+        bgAudioElem.play().catch(e => {
+            console.warn('bgAudioElem.play() failed', e);
+            // on mobile/restricted browsers, show retry button
+            const retryBtn = document.getElementById('audioRetryBtn');
+            if(retryBtn) retryBtn.style.display = 'inline-block';
+        });
         musicOn = true;
     }catch(e){ console.warn('startMusic failed', e); }
 }
@@ -396,6 +397,15 @@ if(toggleMuteBtn){
 }
 
 updateAudioUI();
+
+// Wire up the "Enable audio" retry button for mobile browsers
+const audioRetryBtn = document.getElementById('audioRetryBtn');
+if(audioRetryBtn){
+    audioRetryBtn.addEventListener('click', () => {
+        audioRetryBtn.style.display = 'none'; // hide button before attempting
+        startMusic(); // retry playing
+    });
+}
 
 // Touch / mobile support: show touch controls when on a touch device
 function isTouchDevice(){

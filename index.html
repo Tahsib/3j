@@ -169,6 +169,14 @@ specialImg.onerror = () => { specialImgLoaded = false; console.warn('Failed to l
 // start by trying the local file
 specialImg.src = 'joint2.png';
 
+// --- Cigarette image asset ---
+let cigImg = new Image();
+let cigImgLoaded = false;
+cigImg.crossOrigin = 'anonymous';
+cigImg.onload = () => { cigImgLoaded = true; };
+cigImg.onerror = () => { cigImgLoaded = false; console.warn('Failed to load cig.png'); };
+cigImg.src = 'cig.png';
+
 // Optional user-supplied music file — place a licensed/own copy here named 'ganja_loop.mp3'
 // If present the game can play it when audioMode === 'file'.
 try{
@@ -559,31 +567,41 @@ function draw() {
         }
     }
 
-    // Draw collectibles as cigarettes (white body, brown filter, small ember)
+    // Draw collectibles as cigarettes (image or fallback procedural)
     collectibles.forEach(c => {
-        // Position and size (using separate width/height to fully cover viewport)
         const x = c.x * tileW + tileW/4;
-        const y = c.y * tileH + tileH/2 - tileH/12; // vertically centered inside the cell
+        const y = c.y * tileH + tileH/4;
         const cigWidth = tileW/2;
-        const cigHeight = tileH/6;
+        const cigHeight = tileH/2;
 
-        // White cigarette body
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(x, y, cigWidth - cigHeight, cigHeight);
+        if (cigImgLoaded) {
+            // Draw cig.png image
+            ctx.drawImage(cigImg, x, y, cigWidth, cigHeight);
+        } else {
+            // Fallback: procedural cigarette (white body, brown filter, ember)
+            const cigW = tileW/2;
+            const cigH = tileH/6;
+            const px = c.x * tileW + tileW/4;
+            const py = c.y * tileH + tileH/2 - tileH/12;
 
-        // Brown filter
-        ctx.fillStyle = "#c68642";
-        ctx.fillRect(x + cigWidth - cigHeight, y, cigHeight, cigHeight);
+            // White cigarette body
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(px, py, cigW - cigH, cigH);
 
-        // Ember (tiny orange/red rectangle at the lit end)
-        ctx.fillStyle = "#ff6a00";
-        ctx.fillRect(x + cigWidth - 3, y + cigHeight/4, 3, cigHeight/2);
+            // Brown filter
+            ctx.fillStyle = "#c68642";
+            ctx.fillRect(px + cigW - cigH, py, cigH, cigH);
 
-        // Optional faint smoke dot (subtle gray, adds a tiny touch)
-        ctx.fillStyle = "rgba(200,200,200,0.25)";
-        ctx.beginPath();
-        ctx.arc(x + cigWidth - 6, y - cigHeight/2, 2, 0, Math.PI * 2);
-        ctx.fill();
+            // Ember (tiny orange/red rectangle at the lit end)
+            ctx.fillStyle = "#ff6a00";
+            ctx.fillRect(px + cigW - 3, py + cigH/4, 3, cigH/2);
+
+            // Optional faint smoke dot
+            ctx.fillStyle = "rgba(200,200,200,0.25)";
+            ctx.beginPath();
+            ctx.arc(px + cigW - 6, py - cigH/2, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
     });
 
     // Draw special item as a weed joint (rolled paper, filter on the left, ember/ash on the right)
